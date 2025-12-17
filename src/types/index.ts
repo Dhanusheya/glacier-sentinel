@@ -24,6 +24,7 @@ export interface AuthorityUser extends User {
 
 export interface SensorData {
   timestamp: number;
+  waterLevel?: number;
   waterLevelRise: number; // cm/day
   lakeTemperature: number; // °C
   airTemperature: number; // °C

@@ -123,7 +123,7 @@ export function AuthorityDashboard() {
   
   const lakeTempStatus = getStatusIndicator(currentData.lakeTemperature, 'temp');
   const airTempStatus = getStatusIndicator(currentData.airTemperature, 'temp');
-  const waterStatus = getStatusIndicator(currentData.waterLevel, 'water');
+  const waterStatus = getStatusIndicator(currentData.waterLevel ?? 0, 'water');
 
 
   // Prepare chart data
@@ -187,7 +187,7 @@ export function AuthorityDashboard() {
           padding: 15,
           font: {
             size: 12,
-            weight: '500' as const,
+            weight: 500,
           },
         },
       },
@@ -196,7 +196,7 @@ export function AuthorityDashboard() {
         intersect: false,
         backgroundColor: 'rgba(0, 0, 0, 0.8)',
         padding: 12,
-        titleFont: { size: 13, weight: '600' as const },
+        titleFont: { size: 13, weight: 600 as number},
         bodyFont: { size: 12 },
       },
       annotation: {
@@ -214,7 +214,7 @@ export function AuthorityDashboard() {
               position: 'end' as const,
               backgroundColor: '#eab308',
               color: 'white',
-              font: { size: 10, weight: '600' as const },
+              font: { size: 10, weight: 600 as number},
               padding: 4,
             },
             yAxisID: 'y',
@@ -232,7 +232,7 @@ export function AuthorityDashboard() {
               position: 'end' as const,
               backgroundColor: '#dc2626',
               color: 'white',
-              font: { size: 10, weight: '600' as const },
+              font: { size: 10, weight: 600 as number},
               padding: 4,
             },
             yAxisID: 'y',
@@ -257,7 +257,7 @@ export function AuthorityDashboard() {
         title: {
           display: true,
           text: 'Water Level Rise (cm/day)',
-          font: { size: 12, weight: '600' as const },
+          font: { size: 12, weight: 600 as number},
           color: '#475569',
         },
         grid: {
@@ -275,7 +275,7 @@ export function AuthorityDashboard() {
         title: {
           display: true,
           text: 'Temperature (°C)',
-          font: { size: 12, weight: '600' as const },
+          font: { size: 12, weight: 600 as number},
           color: '#475569',
         },
         grid: {
@@ -360,7 +360,7 @@ export function AuthorityDashboard() {
                 textAlign: 'left',
                 cursor: 'pointer',
                 fontSize: '14px',
-                fontWeight: activeTab === item.id ? 600 : 400,
+                fontWeight: (activeTab === item.id ? 600 : 400) as number,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px',
