@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInAnonymously,
   signOut,
   updateProfile,
 } from 'firebase/auth';
@@ -9,6 +10,58 @@ import { auth, db } from '../config/firebase';
 import type { User, PublicUser, AuthorityUser } from '../types';
 import { DEMO_MODE } from '../config/demoMode';
 import * as demoAuth from './demoAuthService';
+import { getFirebaseErrorMessage } from '../utils/firebaseErrors';
+
+export const PUBLIC_SESSION_KEY = 'glacier_sentinel_public_session';
+
+function savePublicSession(user: PublicUser): void {
+  localStorage.setItem(PUBLIC_SESSION_KEY, JSON.stringify(user));
+}
+
+export function clearPublicSession(): void {
+  localStorage.removeItem(PUBLIC_SESSION_KEY);
+}
+
+export function loadPublicSession(): PublicUser | null {
+  try {
+    const stored = localStorage.getItem(PUBLIC_SESSION_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as PublicUser;
+  } catch {
+    return null;
+  }
+}
+
+/** Sign in anonymously so Firestore rules allow authenticated reads/writes. */
+async function ensurePublicFirestoreAuth(): Promise<string> {
+  if (!auth) {
+    throw new Error('Firebase not configured. Please set up Firebase or enable demo mode.');
+  }
+  if (!auth.currentUser) {
+    await signInAnonymously(auth);
+  }
+  if (!auth.currentUser) {
+    throw new Error('Could not start a public session. Enable Anonymous sign-in in Firebase Console.');
+  }
+  return auth.currentUser.uid;
+}
+
+async function syncPublicUserProfile(user: PublicUser): Promise<void> {
+  if (!db || !auth?.currentUser) return;
+  await setDoc(
+    doc(db, 'users', auth.currentUser.uid),
+    {
+      uid: user.uid,
+      phoneNumber: user.phoneNumber,
+      role: 'public',
+    },
+    { merge: true }
+  );
+}
+
+function wrapFirebaseError(error: unknown): Error {
+  return new Error(getFirebaseErrorMessage(error));
+}
 
 /**
  * Store user data in Firestore
@@ -85,13 +138,19 @@ export async function signUpAuthority(
     };
 
     await storeUserData(firebaseUser.uid, userData);
+    clearPublicSession();
 
     return userData;
-  } catch (error: any) {
-    if (error.code === 'auth/api-key-not-valid') {
+  } catch (error: unknown) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code: string }).code === 'auth/api-key-not-valid'
+    ) {
       throw new Error('Firebase not configured. Please set up Firebase or enable demo mode.');
     }
-    throw error;
+    throw wrapFirebaseError(error);
   }
 }
 
@@ -115,15 +174,23 @@ export async function signInWithEmail(
     const userData = await getUserData(userCredential.user.uid);
     
     if (!userData) {
-      throw new Error('User data not found');
+      throw new Error(
+        'Account signed in but profile is missing. Sign up again or check Firestore rules for the users collection.'
+      );
     }
 
+    clearPublicSession();
     return userData;
-  } catch (error: any) {
-    if (error.code === 'auth/api-key-not-valid' || error.code === 'auth/invalid-api-key') {
+  } catch (error: unknown) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      ['auth/api-key-not-valid', 'auth/invalid-api-key'].includes((error as { code: string }).code)
+    ) {
       throw new Error('Firebase not configured. Please set up Firebase or enable demo mode.');
     }
-    throw error;
+    throw wrapFirebaseError(error);
   }
 }
 
@@ -145,12 +212,10 @@ export async function signInPublicUser(
   }
 
   try {
-    // Mock implementation - in production, use Firebase Phone Auth
-    // For demo, we'll check Firestore for a user with this phone number
     const usersSnapshot = await getDoc(doc(db, 'publicUsers', phoneNumber));
-    
+
     if (!usersSnapshot.exists()) {
-      throw new Error('User not found');
+      throw new Error('User not found. Create an account or use OTP login.');
     }
 
     const userData = usersSnapshot.data();
@@ -158,16 +223,22 @@ export async function signInPublicUser(
       throw new Error('Invalid password');
     }
 
-    return {
+    await ensurePublicFirestoreAuth();
+
+    const publicUser: PublicUser = {
       uid: userData.uid,
       phoneNumber,
       role: 'public',
     };
-  } catch (error: any) {
-    if (error.code === 'auth/api-key-not-valid' || error.code?.includes('api-key')) {
-      throw new Error('Firebase not configured. Please set up Firebase or enable demo mode.');
+
+    await syncPublicUserProfile(publicUser);
+    savePublicSession(publicUser);
+    return publicUser;
+  } catch (error: unknown) {
+    if (error instanceof Error && !('code' in error)) {
+      throw error;
     }
-    throw error;
+    throw wrapFirebaseError(error);
   }
 }
 
@@ -195,6 +266,8 @@ export async function signUpPublic(
       throw new Error('Mobile number already registered');
     }
 
+    await ensurePublicFirestoreAuth();
+
     const newUser: PublicUser = {
       uid: `public_${Date.now()}`,
       phoneNumber,
@@ -207,12 +280,14 @@ export async function signUpPublic(
       createdAt: Date.now(),
     });
 
+    await syncPublicUserProfile(newUser);
+    savePublicSession(newUser);
     return newUser;
-  } catch (error: any) {
-    if (error.code === 'auth/api-key-not-valid' || error.code?.includes('api-key')) {
-      throw new Error('Firebase not configured. Please set up Firebase or enable demo mode.');
+  } catch (error: unknown) {
+    if (error instanceof Error && !('code' in error)) {
+      throw error;
     }
-    throw error;
+    throw wrapFirebaseError(error);
   }
 }
 
@@ -229,34 +304,43 @@ export async function signInWithOTP(phoneNumber: string, otp: string): Promise<P
   }
 
   try {
-    // Mock OTP verification - in production, use Firebase Phone Auth
     if (otp !== '123456') {
       throw new Error('Invalid OTP. Demo OTP is: 123456');
     }
 
-    // Check if user exists, if not create one
+    await ensurePublicFirestoreAuth();
+
     const userDoc = await getDoc(doc(db, 'publicUsers', phoneNumber));
-    
+    let publicUser: PublicUser;
+
     if (!userDoc.exists()) {
-      // Create new public user
-      const newUser: PublicUser = {
+      publicUser = {
         uid: `public_${Date.now()}`,
         phoneNumber,
         role: 'public',
       };
       await setDoc(doc(db, 'publicUsers', phoneNumber), {
-        ...newUser,
-        password: '', // No password for OTP users
+        ...publicUser,
+        password: '',
+        createdAt: Date.now(),
       });
-      return newUser;
+    } else {
+      const data = userDoc.data();
+      publicUser = {
+        uid: data.uid,
+        phoneNumber,
+        role: 'public',
+      };
     }
 
-    return userDoc.data() as PublicUser;
-  } catch (error: any) {
-    if (error.code === 'auth/api-key-not-valid' || error.code?.includes('api-key')) {
-      throw new Error('Firebase not configured. Please set up Firebase or enable demo mode.');
+    await syncPublicUserProfile(publicUser);
+    savePublicSession(publicUser);
+    return publicUser;
+  } catch (error: unknown) {
+    if (error instanceof Error && !('code' in error)) {
+      throw error;
     }
-    throw error;
+    throw wrapFirebaseError(error);
   }
 }
 
@@ -272,14 +356,22 @@ export async function signOutUser(): Promise<void> {
     return demoAuth.demoSignOut();
   }
 
+  clearPublicSession();
+
   try {
-    await signOut(auth);
-  } catch (error: any) {
-    if (error.code === 'auth/api-key-not-valid' || error.code?.includes('api-key')) {
-      // If Firebase fails, try demo signout
+    if (auth.currentUser) {
+      await signOut(auth);
+    }
+  } catch (error: unknown) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      String((error as { code: string }).code).includes('api-key')
+    ) {
       return demoAuth.demoSignOut();
     }
-    throw error;
+    throw wrapFirebaseError(error);
   }
 }
 

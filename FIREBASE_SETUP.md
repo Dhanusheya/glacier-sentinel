@@ -12,8 +12,12 @@
 1. In your Firebase project, go to **Authentication** in the left sidebar
 2. Click **"Get started"**
 3. Go to the **"Sign-in method"** tab
-4. Enable **"Email/Password"** provider:
+4. Enable **"Email/Password"** provider (required for authority login):
    - Click on "Email/Password"
+   - Toggle "Enable" to ON
+   - Click "Save"
+5. Enable **"Anonymous"** provider (required for public user login):
+   - Click on "Anonymous"
    - Toggle "Enable" to ON
    - Click "Save"
 
@@ -56,65 +60,10 @@ const firebaseConfig = {
 ## Step 6: Set Up Firestore Security Rules
 
 1. Go to **Firestore Database** > **Rules** tab
-2. Replace the default rules with:
-
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-
-    /* =========================
-       USERS (PROFILE DATA)
-       ========================= */
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-
-      // Allow update ONLY for non-role fields
-      allow update: if request.auth != null
-        && request.auth.uid == userId
-        && !( "role" in request.resource.data );
-
-      allow create: if request.auth != null && request.auth.uid == userId;
-    }
-
-    /* =========================
-       SENSOR DATA (STRICT)
-       ========================= */
-    match /sensorData/{docId} {
-      // ONLY authorities can read sensor data
-      allow read, write: if request.auth != null
-        && get(/databases/$(database)/documents/users/$(request.auth.uid))
-             .data.role == "authority";
-    }
-
-    /* =========================
-       RISK STATUS (PUBLIC SAFE DATA)
-       ========================= */
-    match /riskStatus/{dayId} {
-      // Public users can read ONLY risk level
-      allow read: if request.auth != null;
-
-      // Only authorities can write/update risk status
-      allow write: if request.auth != null
-        && get(/databases/$(database)/documents/users/$(request.auth.uid))
-             .data.role == "authority";
-    }
-
-    /* =========================
-       ALERTS / NOTIFICATIONS
-       ========================= */
-    match /alerts/{alertId} {
-      allow read: if request.auth != null;
-
-      allow write: if request.auth != null
-        && get(/databases/$(database)/documents/users/$(request.auth.uid))
-             .data.role == "authority";
-    }
-  }
-}
-
-
+2. Copy the contents of **`firestore.rules`** in this repository (project root) and paste them into the Firebase console editor
 3. Click **"Publish"**
+
+> **Important:** If you see **"Missing or insufficient permissions"** when logging in, your published rules likely do not include the `publicUsers` collection or Anonymous auth is disabled.
 
 ## Step 7: Verify Setup
 
@@ -133,9 +82,15 @@ service cloud.firestore {
 - Double-check your API key in `firebaseConfig`
 - Make sure you copied the entire key without any extra spaces
 
+### Error: "Missing or insufficient permissions" on login
+- Publish the rules from **`firestore.rules`** in the Firebase Console (Firestore → Rules → Publish)
+- Enable **Anonymous** sign-in (Authentication → Sign-in method)
+- For authority login, enable **Email/Password** sign-in
+- Restart the dev server after changing rules
+
 ### Error: "Permission denied" in Firestore
-- Check your Firestore security rules
-- Make sure you're authenticated before trying to read/write data
+- Check your Firestore security rules match `firestore.rules`
+- Public users need Anonymous auth; authorities need Email/Password
 
 ### Users not appearing in Firestore
 - Check the browser console for errors

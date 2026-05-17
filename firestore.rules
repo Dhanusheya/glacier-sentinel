@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Authority / public profile data (Firebase Auth uid)
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Public login lookup by phone (get only — needed before auth on password login)
+    match /publicUsers/{phoneNumber} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if request.auth != null;
+      allow delete: if false;
+    }
+
+    // Sensor data — authorities only; public app falls back to mock data
+    match /sensorData/{docId} {
+      allow read, write: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "authority";
+    }
+
+    match /riskStatus/{dayId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "authority";
+    }
+
+    match /alerts/{alertId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "authority";
+    }
+  }
+}

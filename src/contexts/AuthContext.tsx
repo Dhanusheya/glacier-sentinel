@@ -4,7 +4,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import type { User } from '../types';
-import { getUserData } from '../services/authService';
+import { getUserData, loadPublicSession } from '../services/authService';
 import { DEMO_MODE } from '../config/demoMode';
 import * as demoAuth from '../services/demoAuthService';
 
@@ -49,19 +49,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
-      
+
       if (user) {
         try {
           const userData = await getUserData(user.uid);
-          setCurrentUser(userData);
+          if (userData) {
+            setCurrentUser(userData);
+          } else {
+            const publicSession = loadPublicSession();
+            setCurrentUser(publicSession);
+          }
         } catch (error) {
           console.error('Error fetching user data:', error);
-          setCurrentUser(null);
+          const publicSession = loadPublicSession();
+          setCurrentUser(publicSession);
         }
       } else {
-        setCurrentUser(null);
+        const publicSession = loadPublicSession();
+        setCurrentUser(publicSession);
       }
-      
+
       setLoading(false);
     });
 
